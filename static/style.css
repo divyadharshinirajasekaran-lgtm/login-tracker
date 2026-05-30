@@ -1,0 +1,20 @@
+body { background: #f0f2f5; font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; min-height: 100vh; }
+.navbar { background: linear-gradient(135deg, #1a1a2e, #16213e); box-shadow: 0 2px 10px rgba(0,0,0,0.3); }
+.card { border: none; border-radius: 14px; box-shadow: 0 2px 16px rgba(0,0,0,0.08); }
+.login-card { box-shadow: 0 8px 32px rgba(0,0,0,0.12); }
+.brand-icon { font-size: 3.5rem; color: #4f46e5; }
+.min-vh-85 { min-height: 85vh; }
+.stat-card { border-radius: 12px; padding: 1.2rem 1rem; color: white; text-align: center; }
+.stat-label { font-size: 12px; opacity: 0.85; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+.stat-value { font-size: 2rem; font-weight: 700; line-height: 1; }
+.stat-purple { background: linear-gradient(135deg, #4f46e5, #7c3aed); }
+.stat-green  { background: linear-gradient(135deg, #16a34a, #15803d); }
+.stat-red    { background: linear-gradient(135deg, #dc2626, #b91c1c); }
+.stat-orange { background: linear-gradient(135deg, #d97706, #b45309); }
+.stat-dark   { background: linear-gradient(135deg, #374151, #1f2937); }
+.table th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #6b7280; border-bottom: 2px solid #e5e7eb; }
+.badge.threat-low  { background: #d1fae5; color: #065f46; }
+.badge.threat-med  { background: #fef3c7; color: #92400e; }
+.badge.threat-high { background: #fee2e2; color: #991b1b; }
+.footer { background: white; border-top: 1px solid #e5e7eb; margin-top: auto; }
+.table-danger { background-color: rgba(220, 38, 38, 0.06) !important; }

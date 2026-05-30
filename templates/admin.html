@@ -1,0 +1,152 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container-fluid py-4">
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <h4 class="fw-bold mb-0"><i class="bi bi-shield-fill-check me-2 text-warning"></i>Admin Panel</h4>
+    <span class="badge bg-warning text-dark px-3 py-2"><i class="bi bi-shield me-1"></i>Administrator</span>
+  </div>
+
+  <div class="row g-3 mb-4">
+    <div class="col-6 col-md-2"><div class="stat-card stat-purple"><div class="stat-label">Total</div><div class="stat-value">{{ total }}</div></div></div>
+    <div class="col-6 col-md-2"><div class="stat-card stat-green"><div class="stat-label">Success</div><div class="stat-value">{{ success }}</div></div></div>
+    <div class="col-6 col-md-2"><div class="stat-card stat-red"><div class="stat-label">Failed</div><div class="stat-value">{{ failed }}</div></div></div>
+    <div class="col-6 col-md-2"><div class="stat-card stat-orange"><div class="stat-label">Suspicious</div><div class="stat-value">{{ sus_count }}</div></div></div>
+    <div class="col-6 col-md-2"><div class="stat-card stat-dark"><div class="stat-label">Locked</div><div class="stat-value">{{ locked_count }}</div></div></div>
+    <div class="col-6 col-md-2"><div class="stat-card stat-dark"><div class="stat-label">Banned IPs</div><div class="stat-value">{{ banned|length }}</div></div></div>
+  </div>
+
+  {% if suspicious_list %}
+  <div class="alert alert-danger mb-4">
+    <h6 class="fw-bold"><i class="bi bi-exclamation-octagon-fill me-2"></i>Suspicious Activity Alerts ({{ suspicious_list|length }})</h6>
+    <div class="table-responsive mt-2">
+      <table class="table table-sm table-dark mb-0">
+        <thead><tr><th>Time</th><th>Username</th><th>IP</th><th>Reason</th><th>Threat</th></tr></thead>
+        <tbody>
+        {% for a in suspicious_list %}
+        <tr>
+          <td class="small">{{ a.timestamp.strftime('%d %b %H:%M:%S') }}</td>
+          <td class="fw-semibold">{{ a.username }}</td>
+          <td class="font-monospace small">{{ a.ip_address }}</td>
+          <td><span class="badge bg-danger">{{ a.suspicious_reason }}</span></td>
+          <td><span class="badge bg-warning text-dark">{{ a.threat_score }}</span></td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="row g-3 mb-4">
+    <div class="col-lg-9">
+      <div class="card p-3">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <h6 class="fw-bold mb-0"><i class="bi bi-list-columns me-2"></i>All Login Attempts</h6>
+          <div class="btn-group btn-group-sm" role="group">
+            <button class="btn btn-outline-secondary active" onclick="filterTable('all', this)">All</button>
+            <button class="btn btn-outline-success" onclick="filterTable('success', this)">Success</button>
+            <button class="btn btn-outline-danger" onclick="filterTable('failed', this)">Failed</button>
+            <button class="btn btn-outline-warning" onclick="filterTable('suspicious', this)">Suspicious</button>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-hover align-middle" id="attemptsTable">
+            <thead><tr><th>Time</th><th>Username</th><th>IP</th><th>Device</th><th>Location</th><th>Status</th><th>Threat</th><th>Suspicious</th></tr></thead>
+            <tbody>
+            {% for a in attempts %}
+            <tr class="{{ 'table-danger' if a.is_suspicious else '' }}" data-status="{{ a.status }}" data-suspicious="{{ 'true' if a.is_suspicious else 'false' }}">
+              <td class="small">{{ a.timestamp.strftime('%d %b %H:%M:%S') }}</td>
+              <td class="fw-semibold">{{ a.username }}</td>
+              <td class="font-monospace small">{{ a.ip_address }}</td>
+              <td class="small">{{ a.device }}</td>
+              <td class="small">{{ a.location }}</td>
+              <td><span class="badge {% if a.status=='success' %}bg-success{% elif a.status=='blocked' %}bg-secondary{% else %}bg-danger{% endif %}">{{ a.status }}</span></td>
+              <td>
+                {% if a.threat_score < 30 %}<span class="badge threat-low">{{ a.threat_score }}</span>
+                {% elif a.threat_score < 60 %}<span class="badge threat-med">{{ a.threat_score }}</span>
+                {% else %}<span class="badge threat-high">{{ a.threat_score }}</span>{% endif %}
+              </td>
+              <td class="small">{{ a.suspicious_reason if a.is_suspicious else '—' }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="8" class="text-center text-muted py-4">No attempts yet</td></tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-3">
+      <div class="card p-3">
+        <h6 class="fw-bold mb-3"><i class="bi bi-clock me-2"></i>Attempts by Hour</h6>
+        <canvas id="hourChart" height="300"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-md-6">
+      <div class="card p-3">
+        <h6 class="fw-bold mb-3"><i class="bi bi-people me-2"></i>Manage Users</h6>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle">
+            <thead><tr><th>Username</th><th>Fails</th><th>Status</th><th>Action</th></tr></thead>
+            <tbody>
+            {% for u in users %}
+            <tr>
+              <td class="fw-semibold">{{ u.username }}</td>
+              <td>{{ u.fail_count }}</td>
+              <td><span class="badge {% if u.locked %}bg-danger{% else %}bg-success{% endif %}">{{ 'Locked' if u.locked else 'Active' }}</span></td>
+              <td>{% if u.locked %}<a href="/unlock/{{ u.username }}" class="btn btn-sm btn-outline-success"><i class="bi bi-unlock-fill"></i> Unlock</a>{% else %}<span class="text-muted">—</span>{% endif %}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="text-center text-muted">No users registered</td></tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <div class="card p-3">
+        <h6 class="fw-bold mb-3"><i class="bi bi-slash-circle me-2"></i>Banned IPs</h6>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle">
+            <thead><tr><th>IP Address</th><th>Reason</th><th>Action</th></tr></thead>
+            <tbody>
+            {% for b in banned %}
+            <tr>
+              <td class="font-monospace small">{{ b.ip_address }}</td>
+              <td class="small">{{ b.reason }}</td>
+              <td><a href="/unban/{{ b.ip_address }}" class="btn btn-sm btn-outline-warning"><i class="bi bi-shield-x"></i> Unban</a></td>
+            </tr>
+            {% else %}
+            <tr><td colspan="3" class="text-center text-muted">No banned IPs</td></tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+new Chart(document.getElementById('hourChart'), {
+  type: 'bar',
+  data: { labels: Array.from({length:24},(_,i)=>i+'h'), datasets:[{ label:'Attempts', data:{{ hour_data }}, backgroundColor:'rgba(220,38,38,0.7)', borderRadius:4 }] },
+  options: { plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true, ticks:{stepSize:1}}} }
+});
+function filterTable(type, btn) {
+  document.querySelectorAll('.btn-group .btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('#attemptsTable tbody tr').forEach(row => {
+    if (type === 'all') row.style.display = '';
+    else if (type === 'suspicious') row.style.display = row.dataset.suspicious === 'true' ? '' : 'none';
+    else row.style.display = row.dataset.status === type ? '' : 'none';
+  });
+}
+setInterval(() => fetch('/api/stats').then(r => r.json()).then(d => console.log('Live stats:', d)), 30000);
+</script>
+{% endblock %}

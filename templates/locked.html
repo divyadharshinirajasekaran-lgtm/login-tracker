@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="row justify-content-center align-items-center min-vh-85">
+  <div class="col-md-5 text-center">
+    <div class="card p-5">
+      <div class="mb-3"><i class="bi bi-lock-fill text-danger" style="font-size:4rem;"></i></div>
+      <h3 class="fw-bold text-danger">Account Locked</h3>
+      <p class="text-muted mt-2">Your account has been temporarily locked due to too many failed login attempts.</p>
+      <div class="alert alert-warning mt-3">
+        <i class="bi bi-shield-exclamation me-2"></i>This has been reported to the administrator as suspicious activity.
+      </div>
+      <p class="text-muted small">Please contact your administrator to unlock your account.</p>
+      <a href="/login" class="btn btn-outline-secondary mt-2"><i class="bi bi-arrow-left me-2"></i>Back to Login</a>
+    </div>
+  </div>
+</div>
+{% endblock %}
