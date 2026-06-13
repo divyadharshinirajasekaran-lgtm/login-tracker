@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Attack Log - Login Tracker</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <style>
+        :root {
+            --primary: #0f291e;
+            --success: #d4af37;
+            --danger: #dc3545;
+        }
+        body {
+            background: #f8f9fa;
+        }
+        .navbar {
+            background: var(--primary);
+        }
+        .threat-badge {
+            display: inline-block;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 0.85rem;
+        }
+        .threat-badge.low { background: #d4edda; color: #155724; }
+        .threat-badge.medium { background: #fff3cd; color: #856404; }
+        .threat-badge.high { background: #f8d7da; color: #721c24; }
+        .threat-badge.critical { background: #d63031; color: white; }
+        .table-row-attack {
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .table-row-attack:hover {
+            background: #f0f0f0 !important;
+        }
+        .card {
+            border: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        .card-header {
+            background: var(--primary);
+            color: white;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/admin/dashboard">
+                <i class="bi bi-shield-check"></i> Login Tracker
+            </a>
+            <span class="navbar-text text-light me-auto">
+                <small>ATTACK LOG - {{ website|upper }}</small>
+            </span>
+            <a href="/logout" class="btn btn-outline-light btn-sm">
+                <i class="bi bi-box-arrow-right"></i> Logout
+            </a>
+        </div>
+    </nav>
+
+    <div class="container-fluid py-4">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-exclamation-triangle"></i> Detailed Attack Log
+                <span class="badge bg-danger float-end">{{ attacks|length }} Attacks</span>
+            </div>
+            <div class="card-body">
+                <div style="overflow-x: auto;">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr style="background: #f8f9fa;">
+                                <th>Time</th>
+                                <th>User</th>
+                                <th>IP Address</th>
+                                <th>Attack Type</th>
+                                <th>Threat Score</th>
+                                <th>Indicators</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for attack in attacks %}
+                            <tr class="table-row-attack" onclick="window.location.href='/admin/attack/{{ attack.id }}'">
+                                <td>
+                                    <small>{{ attack.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</small>
+                                </td>
+                                <td>
+                                    <strong>{{ attack.username }}</strong>
+                                </td>
+                                <td>
+                                    <code style="background: #f0f0f0; padding: 4px 8px; border-radius: 4px;">
+                                        {{ attack.ip_address }}
+                                    </code>
+                                </td>
+                                <td>
+                                    <strong>{% if attack.attack_type %}{{ attack.attack_type }}{% else %}Unknown{% endif %}</strong>
+                                </td>
+                                <td>
+                                    <span class="threat-badge {{ attack.threat_level|lower }}">
+                                        {{ attack.threat_score }}/100
+                                    </span>
+                                </td>
+                                <td>
+                                    {% set indicators = attack.attack_indicators|safe %}
+                                    {% if indicators and indicators != '[]' %}
+                                        {{ indicators|replace('[', '')|replace(']', '')|replace('"', '')|truncate(80) }}
+                                    {% else %}
+                                        -
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <a href="/admin/attack/{{ attack.id }}" class="btn btn-sm btn-outline-primary">
+                                        <i class="bi bi-eye"></i> View
+                                    </a>
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="7" class="text-center text-muted py-4">
+                                    No attacks detected
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div style="text-align: center; margin-top: 20px;">
+            <a href="/admin/dashboard" class="btn btn-primary">
+                <i class="bi bi-arrow-left"></i> Back to Dashboard
+            </a>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

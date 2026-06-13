@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - Login Tracker</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+    <style>
+        :root {
+            --primary: #0f291e;
+            --success: #d4af37;
+            --danger: #dc3545;
+            --warning: #ffc107;
+            --info: #0dcaf0;
+        }
+        body {
+            background: #f8f9fa;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .navbar {
+            background: var(--primary);
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .navbar .navbar-brand {
+            font-weight: 700;
+            font-size: 1.3rem;
+        }
+        .stat-card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            border-left: 4px solid var(--success);
+        }
+        .stat-card.danger {
+            border-left-color: var(--danger);
+        }
+        .stat-card.warning {
+            border-left-color: var(--warning);
+        }
+        .stat-card.info {
+            border-left-color: var(--info);
+        }
+        .stat-label {
+            font-size: 0.85rem;
+            color: #666;
+            text-transform: uppercase;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--primary);
+        }
+        .attack-alert {
+            background: #fff3cd;
+            border-left: 4px solid var(--warning);
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+        }
+        .attack-alert.critical {
+            background: #f8d7da;
+            border-left-color: var(--danger);
+        }
+        .attack-row {
+            padding: 12px 0;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .attack-row:hover {
+            background: #f0f0f0;
+        }
+        .threat-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        .threat-badge.low {
+            background: #d4edda;
+            color: #155724;
+        }
+        .threat-badge.medium {
+            background: #fff3cd;
+            color: #856404;
+        }
+        .threat-badge.high {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .threat-badge.critical {
+            background: #d63031;
+            color: white;
+        }
+        .card {
+            border: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            border-radius: 10px;
+        }
+        .card-header {
+            background: var(--primary);
+            color: white;
+            font-weight: 600;
+            border-radius: 10px 10px 0 0;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navbar -->
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <i class="bi bi-shield-check"></i> Login Tracker
+            </a>
+            <span class="navbar-text text-light me-auto">
+                <small>{{ website|upper }} ADMIN</small>
+            </span>
+            <a href="/logout" class="btn btn-outline-light btn-sm">
+                <i class="bi bi-box-arrow-right"></i> Logout
+            </a>
+        </div>
+    </nav>
+
+    <div class="container-fluid py-4">
+        <!-- Stats -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="stat-label">Total Attempts</div>
+                    <div class="stat-value">{{ total }}</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card success" style="border-left-color: #28a745;">
+                    <div class="stat-label">Successful</div>
+                    <div class="stat-value" style="color: #28a745;">{{ successful }}</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card warning">
+                    <div class="stat-label">Failed</div>
+                    <div class="stat-value" style="color: #ffc107;">{{ failed }}</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card danger">
+                    <div class="stat-label">🚨 Critical Attacks</div>
+                    <div class="stat-value" style="color: var(--danger);">{{ critical }}</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Alerts -->
+        {% if critical > 0 %}
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <i class="bi bi-exclamation-triangle-fill"></i>
+            <strong>{{ critical }} CRITICAL ATTACKS DETECTED!</strong>
+            <a href="/admin/attacks" class="alert-link">View detailed report →</a>
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        {% endif %}
+
+        <!-- Recent Attacks -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <i class="bi bi-exclamation-circle"></i> Recent Suspicious Activity
+            </div>
+            <div class="card-body" style="max-height: 500px; overflow-y: auto;">
+                {% if recent_attacks %}
+                    {% for attack in recent_attacks %}
+                    <div class="attack-alert {% if attack.threat_level == 'CRITICAL' %}critical{% endif %}">
+                        <div style="display: flex; justify-content: space-between; align-items: start; gap: 15px;">
+                            <div style="flex: 1;">
+                                <strong style="font-size: 1.1rem;">
+                                    {% if attack.attack_type %}
+                                        🚨 {{ attack.attack_type }}
+                                    {% else %}
+                                        Suspicious Activity
+                                    {% endif %}
+                                </strong>
+                                <div style="font-size: 0.9rem; margin-top: 5px; color: #666;">
+                                    <strong>User:</strong> {{ attack.username }}<br>
+                                    <strong>IP:</strong> {{ attack.ip_address }}<br>
+                                    <strong>Time:</strong> {{ attack.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}<br>
+                                    <strong>Indicators:</strong> 
+                                    {% set indicators = attack.attack_indicators|safe %}
+                                    {% if indicators and indicators != '[]' %}
+                                        {{ indicators|replace('[', '')|replace(']', '')|replace('"', '')|truncate(150) }}
+                                    {% else %}
+                                        -
+                                    {% endif %}
+                                </div>
+                            </div>
+                            <div style="text-align: right;">
+                                <span class="threat-badge {{ attack.threat_level|lower }}">
+                                    {{ attack.threat_score }}/100
+                                </span>
+                                <br>
+                                <small style="color: #666;">{{ attack.threat_level }}</small>
+                                <br>
+                                <a href="/admin/attack/{{ attack.id }}" class="btn btn-sm btn-outline-primary mt-2">Details</a>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <p class="text-muted text-center py-4">No suspicious activity detected</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Attack Types Chart -->
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="bi bi-pie-chart"></i> Attack Types
+                    </div>
+                    <div class="card-body">
+                        <canvas id="attackChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="bi bi-bar-chart"></i> Threat Distribution
+                    </div>
+                    <div class="card-body">
+                        <canvas id="threatChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div style="text-align: center; margin-top: 40px; color: #999; font-size: 0.9rem;">
+            <p><i class="bi bi-arrow-repeat"></i> Dashboard updates automatically every 30 seconds</p>
+            <a href="/admin/attacks" class="btn btn-primary">View Full Attack Log</a>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Attack Types Chart
+        const attackTypes = {{ attack_types|tojson }};
+        const labels = attackTypes.map(a => a[0] || 'Unknown');
+        const counts = attackTypes.map(a => a[1]);
+
+        new Chart(document.getElementById('attackChart'), {
+            type: 'doughnut',
+            data: {
+                labels: labels,
+                datasets: [{
+                    data: counts,
+                    backgroundColor: ['#d63031', '#fab1a0', '#ffeaa7', '#74b9ff', '#a29bfe', '#6c5ce7']
+                }]
+            },
+            options: { responsive: true, maintainAspectRatio: true }
+        });
+
+        // Threat Distribution
+        const threatData = {
+            'LOW': {{ suspicious|default(0) - critical }},
+            'MEDIUM': {{ suspicious|default(0) }} - 5,
+            'HIGH': 5,
+            'CRITICAL': {{ critical|default(0) }}
+        };
+
+        new Chart(document.getElementById('threatChart'), {
+            type: 'bar',
+            data: {
+                labels: Object.keys(threatData),
+                datasets: [{
+                    label: 'Count',
+                    data: Object.values(threatData),
+                    backgroundColor: ['#28a745', '#ffc107', '#f8d7da', '#d63031']
+                }]
+            },
+            options: { responsive: true, maintainAspectRatio: true, scales: { y: { beginAtZero: true } } }
+        });
+
+        // Auto-refresh
+        setTimeout(() => location.reload(), 30000);
+    </script>
+</body>
+</html>

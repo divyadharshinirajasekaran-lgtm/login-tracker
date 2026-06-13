@@ -1,110 +1,375 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
+from flask import Flask, render_template, request, redirect, url_for, jsonify, flash
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
-from models import db, User, LoginAttempt, BannedIP
+from models import db, User, LoginAttempt, BannedIP, AttackLog, WebsiteConfig, hash_pw
 from datetime import datetime, timedelta
-from user_agents import parse as ua_parse
-import hashlib
+import os
+import json
+import uuid
+from user_agents import parse
+import requests
 
 app = Flask(__name__)
-app.secret_key = 'internship_secret_2025'
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///tracker.db'
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///tracker.db')
+app.config['SECRET_KEY'] = 'your-secret-key-change-this'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db.init_app(app)
-login_manager = LoginManager(app)
+login_manager = LoginManager()
+login_manager.init_app(app)
 login_manager.login_view = 'login'
-
-MAX_FAIL = 5
-IP_BAN_LIMIT = 10
 
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-def hash_pw(pw):
-    return hashlib.sha256(pw.encode()).hexdigest()
+# ============ UTILITY FUNCTIONS ============
 
-def get_device_info():
-    ua = ua_parse(request.headers.get('User-Agent', ''))
-    device = 'Mobile' if ua.is_mobile else ('Tablet' if ua.is_tablet else 'Desktop')
-    return device, f"{ua.os.family} {ua.os.version_string}".strip(), f"{ua.browser.family}".strip()
+def get_device_info(user_agent_string):
+    """Extract device, OS, browser info"""
+    try:
+        ua = parse(user_agent_string)
+        return str(ua.device), str(ua.os), str(ua.browser)
+    except:
+        return 'Unknown', 'Unknown', 'Unknown'
 
 def fake_location(ip):
+    """Get location from IP"""
+    if ip in ['127.0.0.1', 'localhost']:
+        return 'Local Network'
     try:
-        if ip == '127.0.0.1' or ip.startswith('192.168') or ip.startswith('10.') or ip.startswith('172.'):
-            return 'Local Network'
-        import requests
-        response = requests.get(f'http://ip-api.com/json/{ip}', timeout=3)
+        response = requests.get(f'https://ip-api.com/json/{ip}', timeout=2)
         data = response.json()
-        if data['status'] == 'success':
-            return f"{data['city']}, {data['regionName']}, {data['country']}"
-        else:
-            return 'Unknown Location'
+        if data.get('status') == 'success':
+            return f"{data.get('city', '')}, {data.get('country', '')}"
     except:
-        return 'Unknown Location'
+        pass
+    return 'Unknown'
 
-def calculate_threat(ip, username):
-    score = 0
-    now = datetime.utcnow()
-    ip_fails = LoginAttempt.query.filter_by(ip_address=ip, status='failed')\
-        .filter(LoginAttempt.timestamp > now - timedelta(minutes=10)).count()
-    score += min(ip_fails * 20, 60)
-    user_fails = LoginAttempt.query.filter_by(username=username, status='failed')\
-        .filter(LoginAttempt.timestamp > now - timedelta(minutes=30)).count()
-    score += min(user_fails * 10, 40)
-    if now.hour >= 0 and now.hour < 5:
-        score += 15
-    return min(score, 100)
+# ============ ADVANCED ATTACK DETECTION ENGINE ============
 
-def detect_suspicious(ip, username, threat_score):
-    reasons = []
-    now = datetime.utcnow()
+class AttackDetectionEngine:
+    """Universal attack detection for any website"""
+    
+    ATTACK_TYPES = {
+        'brute_force': {
+            'name': 'Brute Force Attack',
+            'base_threat': 70,
+            'indicators': [
+                '3+ failed logins from same IP in 10 minutes',
+                'Rapid-fire requests (< 1 second apart)',
+                'Sequential or common password attempts',
+                'Failed attempts followed by success'
+            ]
+        },
+        'credential_stuffing': {
+            'name': 'Credential Stuffing Attack',
+            'base_threat': 85,
+            'indicators': [
+                '5+ different usernames attempted from same IP',
+                'Mix of successful and failed attempts',
+                'Common password patterns detected',
+                'Volume suggests automation (10+ attempts/minute)'
+            ]
+        },
+        'account_enumeration': {
+            'name': 'Account Enumeration',
+            'base_threat': 55,
+            'indicators': [
+                'Testing which usernames exist',
+                'Different response times for valid vs invalid users',
+                'No password attempts, only username probing',
+                '3+ different usernames from same IP'
+            ]
+        },
+        'bot_attack': {
+            'name': 'Automated Bot Attack',
+            'base_threat': 75,
+            'indicators': [
+                '5+ requests in under 60 seconds',
+                'Identical user agents or no user agent',
+                'Exact timing between requests (< 100ms)',
+                'No human-like behavior patterns'
+            ]
+        },
+        'distributed_attack': {
+            'name': 'Distributed Attack',
+            'base_threat': 90,
+            'indicators': [
+                'Same username attacked from 5+ different IPs',
+                'Coordinated timing across IPs',
+                'Different geographic locations',
+                'Professional attack infrastructure signatures'
+            ]
+        },
+        'dictionary_attack': {
+            'name': 'Dictionary Attack',
+            'base_threat': 68,
+            'indicators': [
+                'Systematic password testing',
+                'Uses common password lists',
+                'Multiple failed attempts for single account',
+                'Predictable password sequences'
+            ]
+        },
+        'odd_hours_access': {
+            'name': 'Suspicious Time Access',
+            'base_threat': 35,
+            'indicators': [
+                'Login attempt between 12 AM - 5 AM',
+                'Outside normal user activity hours',
+                'Unusual for this account',
+                'Combined with other factors'
+            ]
+        },
+        'location_anomaly': {
+            'name': 'Location Anomaly',
+            'base_threat': 45,
+            'indicators': [
+                'Login from new geographic location',
+                'Impossible travel time between locations',
+                'VPN or proxy detected',
+                'First-time country access'
+            ]
+        },
+        'session_hijacking': {
+            'name': 'Session Hijacking Attempt',
+            'base_threat': 80,
+            'indicators': [
+                'Different device/browser for known account',
+                'Device fingerprint mismatch',
+                'Unusual user agent string',
+                'IP change mid-session'
+            ]
+        },
+        'privilege_escalation': {
+            'name': 'Privilege Escalation Attempt',
+            'base_threat': 95,
+            'indicators': [
+                'Admin account targeted',
+                'Multiple failed attempts on admin account',
+                'Access to sensitive functions attempted',
+                'Unusual for this user account'
+            ]
+        }
+    }
+    
+    @staticmethod
+    def analyze_login(username, ip, status, website, device='Unknown', os_info='Unknown', browser='Unknown'):
+        """Comprehensive attack analysis"""
+        
+        indicators_found = []
+        evidence = []
+        attack_type = None
+        threat_score = 0
+        
+        # Check IP history
+        ip_fails_10min = LoginAttempt.query.filter(
+            LoginAttempt.ip_address == ip,
+            LoginAttempt.status == 'failed',
+            LoginAttempt.timestamp >= datetime.utcnow() - timedelta(minutes=10),
+            LoginAttempt.website == website
+        ).count()
+        
+        ip_attempts_1min = LoginAttempt.query.filter(
+            LoginAttempt.ip_address == ip,
+            LoginAttempt.timestamp >= datetime.utcnow() - timedelta(minutes=1),
+            LoginAttempt.website == website
+        ).count()
+        
+        # Check username history
+        user_fails_30min = LoginAttempt.query.filter(
+            LoginAttempt.username == username,
+            LoginAttempt.status == 'failed',
+            LoginAttempt.timestamp >= datetime.utcnow() - timedelta(minutes=30),
+            LoginAttempt.website == website
+        ).count()
+        
+        different_users_10min = LoginAttempt.query.filter(
+            LoginAttempt.ip_address == ip,
+            LoginAttempt.timestamp >= datetime.utcnow() - timedelta(minutes=10),
+            LoginAttempt.website == website
+        ).distinct(LoginAttempt.username).count()
+        
+        # DETECT: Brute Force
+        if ip_fails_10min >= 3:
+            indicators_found.append('3+ failed logins in 10 minutes')
+            evidence.append(f'{ip_fails_10min} failed attempts from same IP')
+            attack_type = 'brute_force'
+            threat_score = 70
+        
+        # DETECT: Bot Attack
+        if ip_attempts_1min >= 5:
+            indicators_found.append('5+ requests in 60 seconds')
+            evidence.append(f'{ip_attempts_1min} rapid requests detected')
+            attack_type = 'bot_attack'
+            threat_score = max(threat_score, 75)
+        
+        # DETECT: Credential Stuffing
+        if different_users_10min >= 5:
+            indicators_found.append('5+ different usernames attempted')
+            evidence.append(f'{different_users_10min} different accounts probed')
+            attack_type = 'credential_stuffing'
+            threat_score = max(threat_score, 85)
+        
+        # DETECT: Account Enumeration
+        if different_users_10min >= 3 and status == 'failed':
+            indicators_found.append('Account enumeration pattern detected')
+            evidence.append(f'Multiple usernames tested: {different_users_10min}')
+            if not attack_type:
+                attack_type = 'account_enumeration'
+                threat_score = max(threat_score, 55)
+        
+        # DETECT: Odd Hours Access
+        hour = datetime.utcnow().hour
+        if hour >= 0 and hour < 5:
+            indicators_found.append('Login during odd hours (12 AM - 5 AM)')
+            evidence.append(f'Attempt at {hour}:XX (unusual time)')
+            threat_score += 20
+        
+        # DETECT: Admin targeting
+        if 'admin' in username.lower():
+            indicators_found.append('Admin account targeted')
+            evidence.append('Attempt on privileged account detected')
+            threat_score += 25
+            if threat_score >= 80:
+                attack_type = 'privilege_escalation'
+        
+        # Velocity score (how fast)
+        if ip_attempts_1min >= 1:
+            velocity_score = min((ip_attempts_1min / 5) * 100, 100)
+        else:
+            velocity_score = 0
+        
+        # Bot probability
+        if ip_attempts_1min >= 5 or (ip_fails_10min >= 3 and browser == 'Unknown'):
+            bot_probability = 85
+        elif ip_fails_10min >= 1:
+            bot_probability = 45
+        else:
+            bot_probability = 10
+        
+        # Threat level
+        if threat_score >= 80:
+            threat_level = 'CRITICAL'
+        elif threat_score >= 60:
+            threat_level = 'HIGH'
+        elif threat_score >= 40:
+            threat_level = 'MEDIUM'
+        else:
+            threat_level = 'LOW'
+        
+        is_suspicious = threat_score >= 40
+        
+        return {
+            'attack_type': attack_type,
+            'indicators': indicators_found,
+            'evidence': evidence,
+            'threat_score': threat_score,
+            'threat_level': threat_level,
+            'is_suspicious': is_suspicious,
+            'velocity_score': velocity_score,
+            'bot_probability': bot_probability
+        }
 
-    ip_fails_10m = LoginAttempt.query.filter_by(ip_address=ip, status='failed')\
-        .filter(LoginAttempt.timestamp > now - timedelta(minutes=10)).count()
-    if ip_fails_10m >= 3:
-        reasons.append('Brute Force')
+# ============ UNIVERSAL API ENDPOINT ============
 
-    user_fails_30m = LoginAttempt.query.filter_by(username=username, status='failed')\
-        .filter(LoginAttempt.timestamp > now - timedelta(minutes=30)).count()
-    if user_fails_30m >= 5:
-        reasons.append('Credential Stuffing')
+@app.route('/api/track-login', methods=['POST'])
+def api_track_login():
+    """
+    Universal endpoint for ANY website to send login data
+    
+    POST /api/track-login
+    {
+        "username": "user@email.com",
+        "ip_address": "192.168.1.5",
+        "status": "success",  # or "failed"
+        "device": "Mobile",
+        "browser": "Chrome",
+        "os": "Android",
+        "website": "student-management"  # or "hotel", "ecommerce", etc.
+    }
+    """
+    
+    try:
+        data = request.json
+        
+        username = data.get('username', 'unknown')
+        ip = data.get('ip_address', request.remote_addr)
+        status = data.get('status', 'unknown')
+        device = data.get('device', 'Unknown')
+        browser = data.get('browser', 'Unknown')
+        os_info = data.get('os', 'Unknown')
+        website = data.get('website', 'general')
+        
+        location = fake_location(ip)
+        
+        # Run attack detection
+        detection = AttackDetectionEngine.analyze_login(
+            username, ip, status, website, device, os_info, browser
+        )
+        
+        # Save login attempt
+        request_id = str(uuid.uuid4())
+        attempt = LoginAttempt(
+            username=username,
+            ip_address=ip,
+            status=status,
+            device=device,
+            os_info=os_info,
+            browser=browser,
+            threat_score=detection['threat_score'],
+            threat_level=detection['threat_level'],
+            location=location,
+            is_suspicious=detection['is_suspicious'],
+            attack_type=detection['attack_type'],
+            attack_indicators=json.dumps(detection['indicators']),
+            attack_evidence=json.dumps(detection['evidence']),
+            velocity_score=detection['velocity_score'],
+            bot_probability=detection['bot_probability'],
+            website=website,
+            request_id=request_id,
+            is_analyzed=True
+        )
+        db.session.add(attempt)
+        
+        # Log attack if detected
+        if detection['is_suspicious'] and detection['attack_type']:
+            attack_log = AttackLog(
+                login_attempt_id=attempt.id,
+                attack_type=detection['attack_type'],
+                threat_score=detection['threat_score'],
+                threat_level=detection['threat_level'],
+                indicators_found=len(detection['indicators']),
+                website=website,
+                ip_address=ip
+            )
+            db.session.add(attack_log)
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'request_id': request_id,
+            'threat_score': detection['threat_score'],
+            'threat_level': detection['threat_level'],
+            'attack_type': detection['attack_type'],
+            'is_suspicious': detection['is_suspicious'],
+            'message': 'Login tracked successfully'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 400
 
-    if now.hour >= 0 and now.hour < 5:
-        reasons.append('Odd Hours')
-
-    unique_users = db.session.query(LoginAttempt.username)\
-        .filter_by(ip_address=ip)\
-        .filter(LoginAttempt.timestamp > now - timedelta(minutes=30))\
-        .distinct().count()
-    if unique_users >= 3:
-        reasons.append('Username Enumeration')
-
-    rapid = LoginAttempt.query.filter_by(ip_address=ip)\
-        .filter(LoginAttempt.timestamp > now - timedelta(seconds=60)).count()
-    if rapid >= 5:
-        reasons.append('Automated Bot')
-
-    if BannedIP.query.filter_by(ip_address=ip).first():
-        reasons.append('Banned IP Attempt')
-
-    if threat_score >= 60 and not reasons:
-        reasons.append('High Threat Score')
-
-    return bool(reasons), ', '.join(reasons)
-
-def maybe_ban_ip(ip):
-    if ip == '127.0.0.1':  # Never ban localhost
-        return
-    fails = LoginAttempt.query.filter_by(ip_address=ip, status='failed')\
-        .filter(LoginAttempt.timestamp > datetime.utcnow() - timedelta(hours=1)).count()
-    if fails >= IP_BAN_LIMIT:
-        if not BannedIP.query.filter_by(ip_address=ip).first():
-            db.session.add(BannedIP(ip_address=ip, reason=f'Auto-banned: {fails} failed attempts in 1 hour'))
-            db.session.commit()
+# ============ ADMIN ROUTES ============
 
 @app.route('/')
 def index():
+    """Redirect to dashboard"""
+    if current_user.is_authenticated:
+        return redirect(url_for('admin_dashboard'))
     return redirect(url_for('login'))
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -112,166 +377,18 @@ def login():
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '')
-        ip = request.remote_addr
-        device, os_info, browser = get_device_info()
-        location = fake_location(ip)
-        threat = calculate_threat(ip, username)
-        is_sus, sus_reason = detect_suspicious(ip, username, threat)
-
-        if BannedIP.query.filter_by(ip_address=ip).first():
-            db.session.add(LoginAttempt(username=username, ip_address=ip, status='blocked',
-                device=device, os_info=os_info, browser=browser, threat_score=100,
-                location=location, is_suspicious=True, suspicious_reason='Banned IP Attempt'))
-            db.session.commit()
-            flash('Access denied. Your IP is banned.', 'danger')
-            return render_template('login.html')
-
+        module = request.form.get('module', 'student')
+        
         user = User.query.filter_by(username=username).first()
-        if not user:
-            db.session.add(LoginAttempt(username=username, ip_address=ip, status='failed',
-                device=device, os_info=os_info, browser=browser, threat_score=threat,
-                location=location, is_suspicious=is_sus, suspicious_reason=sus_reason))
-            db.session.commit()
-            maybe_ban_ip(ip)
-            flash('Invalid username or password.', 'danger')
-            return render_template('login.html')
-
-        if user.locked:
-            db.session.add(LoginAttempt(username=username, ip_address=ip, status='blocked',
-                device=device, os_info=os_info, browser=browser, threat_score=100,
-                location=location, is_suspicious=True, suspicious_reason='Account Locked'))
-            db.session.commit()
-            return redirect(url_for('locked'))
-
-        if user.password != hash_pw(password):
-            user.fail_count += 1
-            if user.fail_count >= MAX_FAIL:
-                user.locked = True
-            db.session.add(LoginAttempt(username=username, ip_address=ip, status='failed',
-                device=device, os_info=os_info, browser=browser, threat_score=threat,
-                location=location, is_suspicious=is_sus, suspicious_reason=sus_reason))
-            db.session.commit()
-            maybe_ban_ip(ip)
-            remaining = max(0, MAX_FAIL - user.fail_count)
-            if user.locked:
-                return redirect(url_for('locked'))
-            flash(f'Wrong password. {remaining} attempt(s) remaining.', 'danger')
-            return render_template('login.html')
-
-        user.fail_count = 0
-        db.session.add(LoginAttempt(username=username, ip_address=ip, status='success',
-            device=device, os_info=os_info, browser=browser, threat_score=0,
-            location=location, is_suspicious=False, suspicious_reason=''))
-        db.session.commit()
-        login_user(user)
-        return redirect(url_for('admin') if user.is_admin else url_for('dashboard'))
-
+        
+        if user and user.password == hash_pw(password):
+            login_user(user)
+            return redirect(url_for('admin_dashboard'))
+        
+        flash('Invalid credentials', 'danger')
+        return render_template('login.html')
+    
     return render_template('login.html')
-
-@app.route('/register', methods=['GET', 'POST'])
-def register():
-    if request.method == 'POST':
-        username = request.form.get('username', '').strip()
-        password = request.form.get('password', '')
-        if len(username) < 3:
-            flash('Username must be at least 3 characters.', 'danger')
-            return render_template('register.html')
-        if len(password) < 4:
-            flash('Password must be at least 4 characters.', 'danger')
-            return render_template('register.html')
-        if User.query.filter_by(username=username).first():
-            flash('Username already taken.', 'danger')
-            return render_template('register.html')
-        db.session.add(User(username=username, password=hash_pw(password)))
-        db.session.commit()
-        flash('Account created! Please sign in.', 'success')
-        return redirect(url_for('login'))
-    return render_template('register.html')
-
-@app.route('/dashboard')
-@login_required
-def dashboard():
-    attempts = LoginAttempt.query.filter_by(username=current_user.username)\
-        .order_by(LoginAttempt.timestamp.desc()).limit(20).all()
-    total = len(attempts)
-    success = sum(1 for a in attempts if a.status == 'success')
-    failed = sum(1 for a in attempts if a.status == 'failed')
-    suspicious = sum(1 for a in attempts if a.is_suspicious)
-    last_login = next((a for a in attempts if a.status == 'success'), None)
-    hour_data = [0] * 24
-    for a in LoginAttempt.query.filter_by(username=current_user.username).all():
-        hour_data[a.timestamp.hour] += 1
-    import json
-    return render_template('dashboard.html', attempts=attempts, total=total,
-        success=success, failed=failed, suspicious=suspicious,
-        last_login=last_login, hour_data=json.dumps(hour_data))
-
-@app.route('/admin')
-@login_required
-def admin():
-    if not current_user.is_admin:
-        return redirect(url_for('dashboard'))
-    import json
-    attempts = LoginAttempt.query.order_by(LoginAttempt.timestamp.desc()).limit(100).all()
-    users = User.query.filter_by(is_admin=False).all()
-    banned = BannedIP.query.all()
-    suspicious_list = LoginAttempt.query.filter_by(is_suspicious=True)\
-        .order_by(LoginAttempt.timestamp.desc()).limit(20).all()
-    total = LoginAttempt.query.count()
-    success = LoginAttempt.query.filter_by(status='success').count()
-    failed = LoginAttempt.query.filter_by(status='failed').count()
-    sus_count = LoginAttempt.query.filter_by(is_suspicious=True).count()
-    locked_count = User.query.filter_by(locked=True).count()
-    hour_data = [0] * 24
-    for a in LoginAttempt.query.all():
-        hour_data[a.timestamp.hour] += 1
-    return render_template('admin.html', attempts=attempts, users=users,
-        banned=banned, suspicious_list=suspicious_list,
-        total=total, success=success, failed=failed,
-        sus_count=sus_count, locked_count=locked_count,
-        hour_data=json.dumps(hour_data))
-
-@app.route('/unlock/<username>')
-@login_required
-def unlock(username):
-    if not current_user.is_admin:
-        return redirect(url_for('dashboard'))
-    user = User.query.filter_by(username=username).first()
-    if user:
-        user.locked = False
-        user.fail_count = 0
-        db.session.commit()
-        flash(f'{username} has been unlocked.', 'success')
-    return redirect(url_for('admin'))
-
-@app.route('/unban/<ip>')
-@login_required
-def unban(ip):
-    if not current_user.is_admin:
-        return redirect(url_for('dashboard'))
-    ban = BannedIP.query.filter_by(ip_address=ip).first()
-    if ban:
-        db.session.delete(ban)
-        db.session.commit()
-        flash(f'IP {ip} has been unbanned.', 'success')
-    return redirect(url_for('admin'))
-
-@app.route('/api/stats')
-@login_required
-def api_stats():
-    if not current_user.is_admin:
-        return jsonify({'error': 'unauthorized'}), 403
-    return jsonify({
-        'total': LoginAttempt.query.count(),
-        'success': LoginAttempt.query.filter_by(status='success').count(),
-        'failed': LoginAttempt.query.filter_by(status='failed').count(),
-        'suspicious': LoginAttempt.query.filter_by(is_suspicious=True).count(),
-        'locked': User.query.filter_by(locked=True).count()
-    })
-
-@app.route('/locked')
-def locked():
-    return render_template('locked.html')
 
 @app.route('/logout')
 @login_required
@@ -279,11 +396,115 @@ def logout():
     logout_user()
     return redirect(url_for('login'))
 
+@app.route('/admin/dashboard')
+@login_required
+def admin_dashboard():
+    """Admin dashboard - shows attacks based on admin_module"""
+    
+    if not current_user.is_admin:
+        return redirect(url_for('index'))
+    
+    website = current_user.admin_module
+    
+    # Stats
+    total_attempts = LoginAttempt.query.filter_by(website=website).count()
+    successful = LoginAttempt.query.filter_by(website=website, status='success').count()
+    failed = LoginAttempt.query.filter_by(website=website, status='failed').count()
+    suspicious = LoginAttempt.query.filter_by(website=website, is_suspicious=True).count()
+    critical_attacks = LoginAttempt.query.filter(
+        LoginAttempt.website == website,
+        LoginAttempt.threat_level == 'CRITICAL'
+    ).count()
+    
+    # Recent attacks
+    recent_attacks = LoginAttempt.query.filter(
+        LoginAttempt.website == website,
+        LoginAttempt.is_suspicious == True
+    ).order_by(LoginAttempt.timestamp.desc()).limit(20).all()
+    
+    # Attack breakdown
+    attack_types = db.session.query(
+        LoginAttempt.attack_type,
+        db.func.count(LoginAttempt.id)
+    ).filter(
+        LoginAttempt.website == website,
+        LoginAttempt.is_suspicious == True
+    ).group_by(LoginAttempt.attack_type).all()
+    
+    return render_template('admin_dashboard.html',
+        total=total_attempts,
+        successful=successful,
+        failed=failed,
+        suspicious=suspicious,
+        critical=critical_attacks,
+        recent_attacks=recent_attacks,
+        attack_types=attack_types,
+        website=website
+    )
+
+@app.route('/admin/attacks')
+@login_required
+def view_attacks():
+    """Detailed attack log"""
+    
+    if not current_user.is_admin:
+        return redirect(url_for('index'))
+    
+    website = current_user.admin_module
+    
+    attacks = LoginAttempt.query.filter(
+        LoginAttempt.website == website,
+        LoginAttempt.is_suspicious == True
+    ).order_by(LoginAttempt.timestamp.desc()).all()
+    
+    return render_template('admin_attacks.html', attacks=attacks, website=website)
+
+@app.route('/admin/attack/<int:attack_id>')
+@login_required
+def attack_detail(attack_id):
+    """Detailed attack analysis"""
+    
+    attack = LoginAttempt.query.get(attack_id)
+    
+    if not attack or attack.website != current_user.admin_module:
+        return redirect(url_for('admin_dashboard'))
+    
+    indicators = json.loads(attack.attack_indicators) if attack.attack_indicators else []
+    evidence = json.loads(attack.attack_evidence) if attack.attack_evidence else []
+    
+    return render_template('attack_detail.html',
+        attack=attack,
+        indicators=indicators,
+        evidence=evidence
+    )
+
+# ============ INITIALIZATION ============
+
 with app.app_context():
     db.create_all()
-    if not User.query.filter_by(username='admin').first():
-        db.session.add(User(username='admin', password=hash_pw('admin123'), is_admin=True))
-        db.session.commit()
+    
+    # Create default admins
+    if not User.query.filter_by(username='admin_student').first():
+        admin_student = User(
+            username='admin_student',
+            password=hash_pw('student123'),
+            is_admin=True,
+            admin_module='student'
+        )
+        db.session.add(admin_student)
+    
+    if not User.query.filter_by(username='admin_hotel').first():
+        admin_hotel = User(
+            username='admin_hotel',
+            password=hash_pw('hotel123'),
+            is_admin=True,
+            admin_module='hotel'
+        )
+        db.session.add(admin_hotel)
+    
+    db.session.commit()
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    import os
+    port = int(os.environ.get('PORT', 5000))  # change default port for each
+    app.run(debug=False, host='0.0.0.0', port=port)

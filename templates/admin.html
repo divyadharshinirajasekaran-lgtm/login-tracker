@@ -6,6 +6,7 @@
     <span class="badge bg-warning text-dark px-3 py-2"><i class="bi bi-shield me-1"></i>Administrator</span>
   </div>
 
+  <!-- STATS CARDS -->
   <div class="row g-3 mb-4">
     <div class="col-6 col-md-2"><div class="stat-card stat-purple"><div class="stat-label">Total</div><div class="stat-value">{{ total }}</div></div></div>
     <div class="col-6 col-md-2"><div class="stat-card stat-green"><div class="stat-label">Success</div><div class="stat-value">{{ success }}</div></div></div>
@@ -15,20 +16,22 @@
     <div class="col-6 col-md-2"><div class="stat-card stat-dark"><div class="stat-label">Banned IPs</div><div class="stat-value">{{ banned|length }}</div></div></div>
   </div>
 
+  <!-- SUSPICIOUS ALERTS -->
   {% if suspicious_list %}
   <div class="alert alert-danger mb-4">
     <h6 class="fw-bold"><i class="bi bi-exclamation-octagon-fill me-2"></i>Suspicious Activity Alerts ({{ suspicious_list|length }})</h6>
     <div class="table-responsive mt-2">
       <table class="table table-sm table-dark mb-0">
-        <thead><tr><th>Time</th><th>Username</th><th>IP</th><th>Reason</th><th>Threat</th></tr></thead>
+        <thead><tr><th>Time</th><th>Username</th><th>IP</th><th>Attack Type</th><th>Threat Level</th><th>Threat Score</th></tr></thead>
         <tbody>
         {% for a in suspicious_list %}
         <tr>
           <td class="small">{{ a.timestamp.strftime('%d %b %H:%M:%S') }}</td>
           <td class="fw-semibold">{{ a.username }}</td>
           <td class="font-monospace small">{{ a.ip_address }}</td>
-          <td><span class="badge bg-danger">{{ a.suspicious_reason }}</span></td>
-          <td><span class="badge bg-warning text-dark">{{ a.threat_score }}</span></td>
+          <td><span class="badge bg-danger">{{ a.attack_type }}</span></td>
+          <td><span class="badge {% if a.threat_level == 'CRITICAL' %}bg-danger{% elif a.threat_level == 'HIGH' %}bg-warning text-dark{% else %}bg-info{% endif %}">{{ a.threat_level }}</span></td>
+          <td><span class="badge bg-warning text-dark">{{ a.threat_score }}/100</span></td>
         </tr>
         {% endfor %}
         </tbody>
@@ -37,7 +40,9 @@
   </div>
   {% endif %}
 
+  <!-- MAIN SECTION: LOGIN ATTEMPTS + CHART -->
   <div class="row g-3 mb-4">
+    <!-- LEFT: ALL LOGIN ATTEMPTS WITH ADVANCED DETECTION -->
     <div class="col-lg-9">
       <div class="card p-3">
         <div class="d-flex justify-content-between align-items-center mb-3">
@@ -46,36 +51,96 @@
             <button class="btn btn-outline-secondary active" onclick="filterTable('all', this)">All</button>
             <button class="btn btn-outline-success" onclick="filterTable('success', this)">Success</button>
             <button class="btn btn-outline-danger" onclick="filterTable('failed', this)">Failed</button>
-            <button class="btn btn-outline-warning" onclick="filterTable('suspicious', this)">Suspicious</button>
+            <button class="btn btn-outline-warning" onclick="filterTable('suspicious', this)">Attack</button>
           </div>
         </div>
         <div class="table-responsive">
-          <table class="table table-hover align-middle" id="attemptsTable">
-            <thead><tr><th>Time</th><th>Username</th><th>IP</th><th>Device</th><th>Location</th><th>Status</th><th>Threat</th><th>Suspicious</th></tr></thead>
+          <table class="table table-hover" id="attemptsTable">
+            <thead>
+              <tr>
+                <th>User</th>
+                <th>Type</th>
+                <th>IP</th>
+                <th>Time</th>
+                <th>Attack Type</th>
+                <th>Indicators</th>
+                <th>Threat</th>
+                <th>Action</th>
+              </tr>
+            </thead>
             <tbody>
-            {% for a in attempts %}
-            <tr class="{{ 'table-danger' if a.is_suspicious else '' }}" data-status="{{ a.status }}" data-suspicious="{{ 'true' if a.is_suspicious else 'false' }}">
-              <td class="small">{{ a.timestamp.strftime('%d %b %H:%M:%S') }}</td>
-              <td class="fw-semibold">{{ a.username }}</td>
-              <td class="font-monospace small">{{ a.ip_address }}</td>
-              <td class="small">{{ a.device }}</td>
-              <td class="small">{{ a.location }}</td>
-              <td><span class="badge {% if a.status=='success' %}bg-success{% elif a.status=='blocked' %}bg-secondary{% else %}bg-danger{% endif %}">{{ a.status }}</span></td>
+            {% for attempt in attempts %}
+            <tr 
+              style="border-left: 4px solid {% if attempt.threat_level == 'CRITICAL' %}#d32f2f{% elif attempt.threat_level == 'HIGH' %}#f57c00{% elif attempt.threat_level == 'MEDIUM' %}#fbc02d{% else %}#388e3c{% endif %}"
+              data-status="{{ attempt.status }}"
+              data-suspicious="{{ 'true' if attempt.is_attack else 'false' }}"
+            >
+              <td class="fw-semibold">{{ attempt.username }}</td>
+              
+              <!-- USER TYPE -->
               <td>
-                {% if a.threat_score < 30 %}<span class="badge threat-low">{{ a.threat_score }}</span>
-                {% elif a.threat_score < 60 %}<span class="badge threat-med">{{ a.threat_score }}</span>
-                {% else %}<span class="badge threat-high">{{ a.threat_score }}</span>{% endif %}
+                {% if attempt.username in [s.student_id for s in students] %}
+                  <span class="badge bg-info">Student</span>
+                {% else %}
+                  <span class="badge bg-warning text-dark">Teacher</span>
+                {% endif %}
               </td>
-              <td class="small">{{ a.suspicious_reason if a.is_suspicious else '—' }}</td>
+              
+              <td class="small font-monospace">{{ attempt.ip_address }}</td>
+              <td class="small">{{ attempt.timestamp.strftime('%H:%M:%S') }}</td>
+              
+              <!-- ATTACK TYPE -->
+              <td>
+                {% if attempt.attack_type %}
+                  <span class="badge {% if attempt.threat_level == 'CRITICAL' %}bg-danger{% elif attempt.threat_level == 'HIGH' %}bg-warning text-dark{% else %}bg-info{% endif %}">
+                    {{ attempt.attack_type }}
+                  </span>
+                {% else %}
+                  <span class="badge bg-success">Normal</span>
+                {% endif %}
+              </td>
+              
+              <!-- INDICATORS -->
+              <td>
+                {% if attempt.attack_indicators %}
+                  <small style="line-height: 1.8;">
+                    {% for indicator in attempt.attack_indicators | fromjson %}
+                      <div>{{ indicator }}</div>
+                    {% endfor %}
+                  </small>
+                {% else %}
+                  <span class="text-muted">—</span>
+                {% endif %}
+              </td>
+              
+              <!-- THREAT SCORE & LEVEL -->
+              <td>
+                <div class="d-flex align-items-center gap-2">
+                  <span class="badge {% if attempt.threat_level == 'CRITICAL' %}bg-danger{% elif attempt.threat_level == 'HIGH' %}bg-warning text-dark{% elif attempt.threat_level == 'MEDIUM' %}bg-info{% else %}bg-success{% endif %}">
+                    {{ attempt.threat_level }}
+                  </span>
+                  <small class="fw-semibold">{{ attempt.threat_score }}/100</small>
+                </div>
+              </td>
+              
+              <!-- RECOMMENDED ACTION -->
+              <td>
+                <small class="text-muted">{{ attempt.recommended_action or 'Monitor' }}</small>
+                {% if attempt.is_attack %}
+                  <br><button class="btn btn-sm btn-danger mt-1">🚨 Action</button>
+                {% endif %}
+              </td>
             </tr>
             {% else %}
-            <tr><td colspan="8" class="text-center text-muted py-4">No attempts yet</td></tr>
+            <tr><td colspan="8" class="text-center text-muted py-4">No login attempts yet</td></tr>
             {% endfor %}
             </tbody>
           </table>
         </div>
       </div>
     </div>
+
+    <!-- RIGHT: HOURLY CHART -->
     <div class="col-lg-3">
       <div class="card p-3">
         <h6 class="fw-bold mb-3"><i class="bi bi-clock me-2"></i>Attempts by Hour</h6>
@@ -84,29 +149,38 @@
     </div>
   </div>
 
+  <!-- MANAGE USERS + BANNED IPS -->
   <div class="row g-3">
+    <!-- MANAGE USERS -->
     <div class="col-md-6">
       <div class="card p-3">
         <h6 class="fw-bold mb-3"><i class="bi bi-people me-2"></i>Manage Users</h6>
         <div class="table-responsive">
           <table class="table table-sm align-middle">
-            <thead><tr><th>Username</th><th>Fails</th><th>Status</th><th>Action</th></tr></thead>
+            <thead><tr><th>Username</th><th>Type</th><th>Fails</th><th>Status</th><th>Action</th></tr></thead>
             <tbody>
             {% for u in users %}
             <tr>
               <td class="fw-semibold">{{ u.username }}</td>
+              <td>
+                <span class="badge {% if u.user_type == 'admin' %}bg-warning text-dark{% elif u.user_type == 'teacher' %}bg-info{% else %}bg-success{% endif %}">
+                  {{ u.user_type | upper }}
+                </span>
+              </td>
               <td>{{ u.fail_count }}</td>
               <td><span class="badge {% if u.locked %}bg-danger{% else %}bg-success{% endif %}">{{ 'Locked' if u.locked else 'Active' }}</span></td>
-              <td>{% if u.locked %}<a href="/unlock/{{ u.username }}" class="btn btn-sm btn-outline-success"><i class="bi bi-unlock-fill"></i> Unlock</a>{% else %}<span class="text-muted">—</span>{% endif %}</td>
+              <td>{% if u.locked %}<a href="/unlock/{{ u.username }}" class="btn btn-sm btn-outline-success"><i class="bi bi-unlock-fill"></i> Unlock</a>{% else %}—{% endif %}</td>
             </tr>
             {% else %}
-            <tr><td colspan="4" class="text-center text-muted">No users registered</td></tr>
+            <tr><td colspan="5" class="text-center text-muted">No users registered</td></tr>
             {% endfor %}
             </tbody>
           </table>
         </div>
       </div>
     </div>
+
+    <!-- BANNED IPs -->
     <div class="col-md-6">
       <div class="card p-3">
         <h6 class="fw-bold mb-3"><i class="bi bi-slash-circle me-2"></i>Banned IPs</h6>
@@ -131,13 +205,26 @@
   </div>
 </div>
 {% endblock %}
+
 {% block scripts %}
 <script>
 new Chart(document.getElementById('hourChart'), {
   type: 'bar',
-  data: { labels: Array.from({length:24},(_,i)=>i+'h'), datasets:[{ label:'Attempts', data:{{ hour_data }}, backgroundColor:'rgba(220,38,38,0.7)', borderRadius:4 }] },
-  options: { plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true, ticks:{stepSize:1}}} }
+  data: { 
+    labels: Array.from({length:24},(_,i)=>i+'h'), 
+    datasets:[{ 
+      label:'Attempts', 
+      data:{{ hour_data }}, 
+      backgroundColor:'rgba(220,38,38,0.7)', 
+      borderRadius:4 
+    }] 
+  },
+  options: { 
+    plugins:{legend:{display:false}}, 
+    scales:{y:{beginAtZero:true, ticks:{stepSize:1}}} 
+  }
 });
+
 function filterTable(type, btn) {
   document.querySelectorAll('.btn-group .btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
@@ -147,6 +234,7 @@ function filterTable(type, btn) {
     else row.style.display = row.dataset.status === type ? '' : 'none';
   });
 }
+
 setInterval(() => fetch('/api/stats').then(r => r.json()).then(d => console.log('Live stats:', d)), 30000);
 </script>
 {% endblock %}
